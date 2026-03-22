@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+  <title>Flooring Crew Tracker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link rel="manifest" href="manifest.json">
+
+  <style>
+    body { font-family: Arial; padding: 10px; }
+    input, button { padding: 10px; margin: 5px 0; width: 100%; }
+    .task { border: 1px solid #ccc; padding: 10px; margin: 5px 0; }
+    .column { margin-bottom: 20px; }
+  </style>
+
+</head>
+
+<body>
+
+<h2>Flooring Crew Tracker</h2>
+
+<input id="task" placeholder="Task (Install LVP - Unit 302)">
+<input id="worker" placeholder="Worker">
+<input id="sqft" placeholder="Sq Ft">
+<button onclick="addTask()">Add Task</button>
+
+<h3>Not Started</h3>
+<div id="todo"></div>
+
+<h3>In Progress</h3>
+<div id="progress"></div>
+
+<h3>Completed</h3>
+<div id="done"></div>
+
+<script>
+let tasks = { todo: [], progress: [], done: [] };
+
+function save() {
+  localStorage.setItem("tasks", JSON.stringify(tasks));
+}
+
+function load() {
+  const data = localStorage.getItem("tasks");
+  if (data) tasks = JSON.parse(data);
+}
+
+function addTask() {
+  const t = {
+    name: task.value,
+    worker: worker.value,
+    sqft: sqft.value,
+    time: 0,
+    start: null
+  };
+  tasks.todo.push(t);
+  save();
+  render();
+}
+
+function startTask(type, i) {
+  tasks[type][i].start = Date.now();
+  render();
+}
+
+function stopTask(type, i) {
+  const t = tasks[type][i];
+  if (t.start) {
+    t.time += (Date.now() - t.start) / 60000;
+    t.start = null;
+  }
+  save();
+  render();
+}
+
+function move(type, to, i) {
+  const t = tasks[type].splice(i,1)[0];
+  tasks[to].push(t);
+  save();
+  render();
+}
+
+function render() {
+  ["todo","progress","done"].forEach(col=>{
+    document.getElementById(col).innerHTML = "";
+    tasks[col].forEach((t,i)=>{
+      document.getElementById(col).innerHTML += `
+        <div class="task">
+          <b>${t.name}</b><br>
+          👷 ${t.worker}<br>
+          📐 ${t.sqft} sq ft<br>
+          ⏱ ${t.time.toFixed(1)} min<br>
+
+          <button onclick="startTask('${col}',${i})">Start</button>
+          <button onclick="stopTask('${col}',${i})">Stop</button>
+
+          ${col==="todo" ? `<button onclick="move('todo','progress',${i})">Start Job</button>` : ""}
+          ${col==="progress" ? `<button onclick="move('progress','done',${i})">Done</button>` : ""}
+        </div>
+      `;
+    });
+  });
+}
+
+load();
+render();
+</script>
+
+</body>
+</html>
