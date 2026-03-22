@@ -1,26 +1,40 @@
 <!DOCTYPE html>
-
 <html>
 <head>
-  <title>Flooring Crew Tracker</title>
+  <title>Flooring Crew Tracker PRO+</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <link rel="manifest" href="manifest.json">
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"></script>
 
   <style>
     body { font-family: Arial; padding: 10px; }
-    input, button { padding: 10px; margin: 5px 0; width: 100%; }
+    input, button, select { padding: 10px; margin: 5px 0; width: 100%; }
     .task { border: 1px solid #ccc; padding: 10px; margin: 5px 0; }
-    .column { margin-bottom: 20px; }
   </style>
-
 </head>
-
 <body>
 
-<h2>Flooring Crew Tracker</h2>
+<h2>Flooring Crew Tracker PRO+</h2>
 
-<input id="task" placeholder="Task (Install LVP - Unit 302)">
+<div id="auth">
+  <input id="email" placeholder="Email">
+  <input id="password" type="password" placeholder="Password">
+  <button onclick="signup()">Sign Up</button>
+  <button onclick="login()">Login</button>
+  <button onclick="logout()">Logout</button>
+</div>
+
+<hr>
+
+<select id="jobSelect"></select>
+<input id="newJob" placeholder="New Job Site">
+<button onclick="addJob()">Add Job Site</button>
+
+<hr>
+
+<input id="task" placeholder="Task">
 <input id="worker" placeholder="Worker">
 <input id="sqft" placeholder="Sq Ft">
 <button onclick="addTask()">Add Task</button>
@@ -31,80 +45,172 @@
 <h3>In Progress</h3>
 <div id="progress"></div>
 
-<h3>Completed</h3>
+<h3>Done</h3>
 <div id="done"></div>
 
-<script>
-let tasks = { todo: [], progress: [], done: [] };
+<hr>
+<h3>🏆 Worker Leaderboard</h3>
+<div id="leaderboard"></div>
 
-function save() {
-  localStorage.setItem("tasks", JSON.stringify(tasks));
+<script>
+
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT.firebaseio.com",
+  projectId: "YOUR_PROJECT",
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const auth = firebase.auth();
+
+let currentJob = "default";
+let currentUser = null;
+
+// --- AUTH ---
+function signup() {
+  auth.createUserWithEmailAndPassword(email.value, password.value);
 }
 
-function load() {
-  const data = localStorage.getItem("tasks");
-  if (data) tasks = JSON.parse(data);
+function login() {
+  auth.signInWithEmailAndPassword(email.value, password.value);
+}
+
+function logout() {
+  auth.signOut();
+}
+
+auth.onAuthStateChanged(user => {
+  currentUser = user;
+  if (user) {
+    loadJobs();
+  }
+});
+
+// --- JOBS ---
+function loadJobs() {
+  db.ref("jobs").on("value", snap => {
+    const jobs = snap.val() || {};
+    jobSelect.innerHTML = "";
+    Object.keys(jobs).forEach(j => {
+      jobSelect.innerHTML += `<option value="${j}">${j}</option>`;
+    });
+    currentJob = jobSelect.value || "default";
+    listenTasks();
+  });
+}
+
+function addJob() {
+  const name = newJob.value;
+  if (!name) return;
+  db.ref("jobs/" + name).set(true);
+  newJob.value = "";
+}
+
+jobSelect.onchange = () => {
+  currentJob = jobSelect.value;
+  listenTasks();
+};
+
+// --- TASKS ---
+function listenTasks() {
+  db.ref("tasks/" + currentJob).on("value", snap => {
+    const data = snap.val() || { todo:{}, progress:{}, done:{} };
+    render(data);
+    updateLeaderboard(data);
+  });
 }
 
 function addTask() {
   const t = {
     name: task.value,
     worker: worker.value,
-    sqft: sqft.value,
+    sqft: Number(sqft.value) || 0,
     time: 0,
     start: null
   };
-  tasks.todo.push(t);
-  save();
-  render();
+  db.ref(`tasks/${currentJob}/todo`).push(t);
 }
 
-function startTask(type, i) {
-  tasks[type][i].start = Date.now();
-  render();
+function startTask(col,id,t) {
+  t.start = Date.now();
+  db.ref(`tasks/${currentJob}/${col}/${id}`).set(t);
 }
 
-function stopTask(type, i) {
-  const t = tasks[type][i];
+function stopTask(col,id,t) {
   if (t.start) {
-    t.time += (Date.now() - t.start) / 60000;
+    t.time += (Date.now() - t.start)/60000;
     t.start = null;
   }
-  save();
-  render();
+  db.ref(`tasks/${currentJob}/${col}/${id}`).set(t);
 }
 
-function move(type, to, i) {
-  const t = tasks[type].splice(i,1)[0];
-  tasks[to].push(t);
-  save();
-  render();
+function move(from,to,id,t) {
+  db.ref(`tasks/${currentJob}/${from}/${id}`).remove();
+  db.ref(`tasks/${currentJob}/${to}`).push(t);
 }
 
-function render() {
+// --- RENDER ---
+function render(tasks) {
   ["todo","progress","done"].forEach(col=>{
-    document.getElementById(col).innerHTML = "";
-    tasks[col].forEach((t,i)=>{
+    document.getElementById(col).innerHTML="";
+    const c = tasks[col]||{};
+    Object.keys(c).forEach(id=>{
+      const t=c[id];
+      const prod = t.time ? (t.sqft/(t.time/60)).toFixed(1) : 0;
       document.getElementById(col).innerHTML += `
         <div class="task">
           <b>${t.name}</b><br>
           👷 ${t.worker}<br>
           📐 ${t.sqft} sq ft<br>
           ⏱ ${t.time.toFixed(1)} min<br>
+          ⚡ ${prod} sq ft/hr<br>
 
-          <button onclick="startTask('${col}',${i})">Start</button>
-          <button onclick="stopTask('${col}',${i})">Stop</button>
+          <button onclick="startTask('${col}','${id}',${JSON.stringify(t).replace(/"/g,'&quot;')})">Start</button>
+          <button onclick="stopTask('${col}','${id}',${JSON.stringify(t).replace(/"/g,'&quot;')})">Stop</button>
 
-          ${col==="todo" ? `<button onclick="move('todo','progress',${i})">Start Job</button>` : ""}
-          ${col==="progress" ? `<button onclick="move('progress','done',${i})">Done</button>` : ""}
-        </div>
-      `;
+          ${col==='todo'?`<button onclick="move('todo','progress','${id}',${JSON.stringify(t).replace(/"/g,'&quot;')})">Start Job</button>`:''}
+          ${col==='progress'?`<button onclick="move('progress','done','${id}',${JSON.stringify(t).replace(/"/g,'&quot;')})">Done</button>`:''}
+        </div>`;
     });
   });
 }
 
-load();
-render();
+// --- LEADERBOARD ---
+function updateLeaderboard(tasks) {
+  const stats = {};
+
+  ["todo","progress","done"].forEach(col => {
+    const c = tasks[col] || {};
+    Object.values(c).forEach(t => {
+      if (!t.worker) return;
+
+      if (!stats[t.worker]) {
+        stats[t.worker] = { sqft:0, time:0 };
+      }
+
+      stats[t.worker].sqft += t.sqft;
+      stats[t.worker].time += t.time;
+    });
+  });
+
+  let html = "";
+
+  Object.keys(stats)
+    .map(w => {
+      const hrs = stats[w].time/60;
+      const prod = hrs ? (stats[w].sqft/hrs).toFixed(1) : 0;
+      return { name:w, prod };
+    })
+    .sort((a,b)=> b.prod - a.prod)
+    .forEach((w,i)=>{
+      html += `${i+1}. ${w.name} - ${w.prod} sq ft/hr<br>`;
+    });
+
+  document.getElementById("leaderboard").innerHTML = html;
+}
+
 </script>
 
 </body>
